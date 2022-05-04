@@ -8,7 +8,7 @@ use void::Void;
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 pub struct Service {
     pub image: Option<String>,
-    #[serde(deserialize_with = "string_or_struct")]
+    #[serde(default, deserialize_with = "opt_string_or_struct")]
     pub build: Option<Build>,
 }
 
@@ -39,7 +39,7 @@ where
     T: Deserialize<'de> + FromStr<Err = Void>,
     D: Deserializer<'de>,
 {
-    struct StringOrStruct<T>(PhantomData<fn() -> T>);
+    struct StringOrStruct<T>(PhantomData<T>);
 
     impl<'de, T> Visitor<'de> for StringOrStruct<T>
     where
@@ -69,6 +69,41 @@ where
     deserializer.deserialize_any(StringOrStruct(PhantomData))
 }
 
+pub fn opt_string_or_struct<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de> + FromStr<Err = Void>,
+    D: Deserializer<'de>,
+{
+    struct OptStringOrStruct<T>(PhantomData<T>);
+
+    impl<'de, T> Visitor<'de> for OptStringOrStruct<T>
+    where
+        T: Deserialize<'de> + FromStr<Err = Void>,
+    {
+        type Value = Option<T>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a nul, a string or map")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            string_or_struct(deserializer).map(Some)
+        }
+    }
+
+    deserializer.deserialize_option(OptStringOrStruct(PhantomData))
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -78,7 +113,6 @@ mod tests {
     fn test() {
         let s = r#"---
         image: busybox
-        build: build_1
         "#;
 
         let yaml: Service = serde_yaml::from_str(s).unwrap();
